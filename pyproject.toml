@@ -1,0 +1,16 @@
+[project]
+name = "lora-finetune-eval"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "datasets>=2.16.0",
+    "mlflow>=2.9.0",
+    "numpy>=1.26.0",
+    "peft>=0.4.0",
+    "pytest>=9.0.3",
+    "rouge-score>=0.1.2",
+    "torch>=2.0.0",
+    "transformers>=4.34.0",
+]

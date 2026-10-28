@@ -1,535 +1,481 @@
-This repo is currently much more focused than the agent repo: it benchmarks dense, BM25, and RRF hybrid retrieval with synthetic ML documents and standard IR metrics. The upgrade should turn it into a serious retrieval-evaluation lab that can plug into your RAG/agent stack.
+LoRA Fine-Tuning Evaluation Lab
 
-Received app response
-Thought for 32s
+A serious, reproducible framework for answering:
 
-Yes. For hybrid-retrieval-benchmark, I would evolve it into:
+Did LoRA fine-tuning actually improve the model?
+Where did it improve?
+Where did it regress?
+Was the improvement worth the cost?
+Did it overfit?
+Did it hurt general behavior?
+Can we compare LoRA configs rigorously?
 
-Hybrid Retrieval Lab
+The current repo already has a solid foundation: it prepares a Dolly-15k subset, fine-tunes gpt2 with LoRA/PEFT, evaluates base vs fine-tuned models, logs to MLflow, and saves artifacts. It uses Hugging Face Transformers, PEFT, datasets, MLflow, ROUGE, NumPy, and Torch.
 
-A serious, reproducible benchmark framework for comparing:
+A few important technical issues to address:
 
-BM25
-dense embeddings
-hybrid RRF
-score fusion
-query-adaptive routing
-reranking
-GraphRAG-style retrieval
-agent-memory retrieval
-long-context retrieval
-multilingual retrieval
-
-This repo fits your career story well because your portfolio already emphasizes LLM + vector retrieval, embeddings, Databricks SQL, and agentic analytics systems .
-
-Your current repo already benchmarks dense, BM25, and hybrid RRF, and produces metrics/report/plots. The code currently uses sentence-transformers, rank_bm25, and RRF with configurable k_values, model_name, and rrf_k.
-
-Updated plan
-Phase 1 — Make it a real benchmark framework
+The README says LoRA is applied to attention projections, but target_modules=["q_proj", "v_proj"] may not match GPT-2 module names; GPT-2 typically uses modules like c_attn, so current LoRA targeting may fail or train nothing depending on PEFT behavior.
+The training code labels the full prompt + response, so the model is trained to predict the instruction text too. For instruction tuning, you usually want loss only on the response portion.
+Evaluation currently computes useful metrics, but it should export metrics.json, log eval metrics to MLflow, and support richer pre/post regression analysis.
+Roadmap
+Phase 1 — Make the experiment correct
 
 Add:
 
-typed data schemas
-CLI args
-dataset validation
-per-query result export
-statistical comparison
-CI
-unit tests
-reproducibility metadata
-Phase 2 — Add modern retrieval methods
+config file
+model-family-aware LoRA target modules
+response-only loss masking
+train/eval reproducibility metadata
+metrics JSON
+MLflow logging for evaluation
+tests for prompt formatting and label masking
+Phase 2 — Make evaluation serious
 
 Add:
 
-weighted RRF
-score normalization fusion
-distribution-based score fusion
-dense + sparse reranking
-cross-encoder reranker
-query-adaptive routing
-
-Qdrant’s docs explicitly frame hybrid search as combining dense semantic retrieval with sparse exact-match retrieval and support RRF/score-fusion style approaches.
-
-Phase 3 — Add stronger datasets
-
-Move beyond synthetic ML docs:
-
-BEIR datasets
-small local “mini-BEIR” subset
-enterprise-style RAG dataset
-agent-memory retrieval dataset
-long-document retrieval dataset
-
-BEIR is a widely used heterogeneous IR benchmark for testing retrieval generalization across domains.
-
-Phase 4 — Make it research-grade
-
-Add:
-
-ablation studies
-confidence intervals
-latency/quality Pareto frontier
+bootstrap confidence intervals
+per-category breakdown
+win/loss/tie analysis
+hallucination / format / verbosity regressions
+baseline vs LoRA comparison report
 failure clustering
-query-type router analysis
-“when hybrid helps vs hurts” report
-Phase 5 — Connect to your agent repo
+Phase 3 — Compare LoRA strategies
 
-This is the big opportunity.
+Add experiment grid:
 
-Your open-ended-task-agent needs a retrieval layer. This repo can become the retrieval evaluation engine for OETA-Lab:
+rank r
+alpha
+dropout
+target modules
+learning rate
+epochs
+response-only vs full causal loss
+full fine-tune vs LoRA if small enough
+Phase 4 — Modernize models
 
-OETA-Lab agent
-  ↓
-retrieval strategy selector
-  ↓
-hybrid-retrieval-benchmark
-  ↓
-retrieval quality + latency + failure report
+Add small modern instruct models:
 
-That makes both repos stronger.
+Qwen small instruct
+TinyLlama
+Phi small models
+Mistral/Qwen adapters if hardware allows
+Phase 5 — Connect to your larger portfolio
+
+Use this repo to train/evaluate:
+
+a verifier
+a router
+a skill matcher
+an instruction-following adapter
+an agent trace summarizer
+
+That connects directly to your agentic AI path and your enterprise LLM work. Your career materials already emphasize LLM planning, vector search, embeddings, and tool-use pipelines , so this repo should become the “fine-tuning and evaluation” leg of that portfolio.
 
 Claude Code prompt
 You are working in my repo:
-paulyonghaoli/hybrid-retrieval-benchmark
-
-The repo currently compares:
-- dense retrieval using sentence-transformers
-- sparse BM25 using rank_bm25
-- hybrid retrieval using Reciprocal Rank Fusion
-
-Current outputs include:
-- results/metrics.json
-- results/report.md
-- results/plots/
+paulyonghaoli/lora-finetune-eval
 
 Long-term goal:
-Transform this repo into “Hybrid Retrieval Lab” — a serious retrieval evaluation framework for RAG systems, agent memory systems, GraphRAG-style retrieval, and query-adaptive hybrid search.
+Transform this repo from a simple LoRA fine-tuning demo into “LoRA Fine-Tuning Evaluation Lab” — a reproducible framework for testing whether parameter-efficient fine-tuning actually improves an LLM, where it regresses, whether it overfits, and which LoRA configuration is worth using.
 
-Do NOT rewrite everything at once. Build a stable research-grade foundation first.
+Do NOT rewrite everything at once.
+Build a stable, correct foundation first.
 
-==================================================
-PHASE 1 TARGET — BENCHMARK FOUNDATION
-==================================================
-
-Main goals:
-1. Make the benchmark reproducible
-2. Add typed schemas and validation
-3. Add richer result exports
-4. Add stronger fusion methods
-5. Add query-adaptive routing skeleton
-6. Add tests and CI
-7. Keep the repo readable and interview-friendly
+Current repo:
+- data/prepare.py prepares Dolly-15k closed_qa examples
+- training/train.py fine-tunes gpt2 with LoRA/PEFT
+- evaluation/evaluate.py compares base vs fine-tuned model
+- evaluation/error_analysis.py clusters failures
+- main.py supports prepare/train/evaluate/error-analysis/all
+- MLflow is used for training logs
+- results include eval outputs/report
 
 ==================================================
-PART 1 — PROJECT STRUCTURE CLEANUP
+PHASE 1 TARGET — CORRECT + REPRODUCIBLE LORA EVAL
 ==================================================
 
-Review the current codebase.
-
-Keep existing behavior:
-- python data/prepare_corpus.py
-- python main.py
-- dense / sparse / hybrid benchmark
-
-But improve structure if needed.
-
-Suggested package structure:
-
-retrieval/
-  dense.py
-  sparse.py
-  hybrid.py
-  fusion.py
-  rerank.py
-  router.py
-
-evaluation/
-  benchmark.py
-  metrics.py
-  schemas.py
-  analysis.py
-  reporting.py
-
-data/
-  prepare_corpus.py
-
-scripts/
-  run_benchmark.py
-  compare_runs.py
-
-tests/
+Main objectives:
+1. Fix model-family-aware LoRA target modules
+2. Add response-only loss masking
+3. Add config-driven training/evaluation
+4. Add richer result exports
+5. Add evaluation MLflow logging
+6. Add statistical comparison
+7. Add tests and CI
+8. Keep default demo runnable on CPU/small GPU
 
 ==================================================
-PART 2 — TYPED DATA SCHEMAS
+PART 1 — CONFIG FILE
 ==================================================
 
-Create evaluation/schemas.py.
+Add config.yaml.
 
-Define dataclasses or Pydantic models:
+Example:
 
-Document:
-- doc_id: str
-- title: str
-- text: str
-- metadata: dict optional
+seed: 42
 
-Query:
-- query_id: str
-- query: str
-- relevant_doc_ids: list[str]
-- query_type: str
-- metadata: dict optional
+dataset:
+  name: databricks/databricks-dolly-15k
+  category: closed_qa
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  max_examples: 1000
 
-RetrievalResult:
-- query_id
-- strategy
-- ranked_doc_ids
-- scores optional
-- latency_ms
-- query_type
+model:
+  name: gpt2
+  model_family: gpt2
+  device: auto
+  max_length: 512
 
-Validation requirements:
-- doc_id unique
-- query_id unique
-- every relevant_doc_id exists in corpus
-- query text not empty
-- document text not empty
-- query_type not empty
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  bias: none
+  target_modules: auto
 
-Add clear error messages.
+training:
+  epochs: 3
+  batch_size: 8
+  learning_rate: 2e-4
+  warmup_steps: 100
+  weight_decay: 0.01
+  eval_steps: 200
+  save_steps: 200
+  gradient_accumulation_steps: 1
+  response_only_loss: true
 
-Add tests for invalid corpus/query files.
+generation:
+  max_new_tokens: 128
+  do_sample: false
+  temperature: 0.0
 
-==================================================
-PART 3 — CLI CONFIGURATION
-==================================================
+paths:
+  data_dir: data
+  checkpoint_dir: checkpoints
+  results_dir: results
+  mlflow_dir: mlruns
 
-Replace hardcoded main.py behavior with argparse while preserving default behavior.
+Update main.py:
+python main.py prepare --config config.yaml
+python main.py train --config config.yaml
+python main.py evaluate --config config.yaml
+python main.py all --config config.yaml
 
-Support:
-
-python main.py --config config.yaml
-python main.py --corpus data/corpus.jsonl --queries data/queries.jsonl
-python main.py --out results
-python main.py --strategies dense sparse hybrid
-python main.py --k 1 3 5 10
-python main.py --model all-MiniLM-L6-v2
-
-Keep config.yaml as the default.
-
-==================================================
-PART 4 — RICH RESULT EXPORT
-==================================================
-
-Currently metrics.json is aggregate-heavy.
-
-Add:
-results/run_metadata.json
-results/per_query_results.jsonl
-results/metrics.json
-results/report.md
-
-run_metadata.json should include:
-- timestamp
-- git commit if available
-- python version
-- platform
-- model name
-- corpus size
-- query count
-- k values
-- config
-
-per_query_results.jsonl should include for every query and strategy:
-- query_id
-- query
-- query_type
-- relevant_doc_ids
-- ranked_doc_ids
-- metrics by k
-- latency_ms
+Preserve current CLI defaults.
 
 ==================================================
-PART 5 — MORE FUSION METHODS
+PART 2 — MODEL-FAMILY-AWARE LORA TARGETS
 ==================================================
 
-Create retrieval/fusion.py.
+Current training code uses:
+target_modules=["q_proj", "v_proj"]
 
-Implement:
-1. Reciprocal Rank Fusion
-2. Weighted Reciprocal Rank Fusion
-3. CombSUM with min-max score normalization
-4. Distribution-based score fusion if simple enough
+This may not work correctly for GPT-2.
+Implement a helper:
 
-Important:
-- Dense and BM25 raw scores are not directly comparable.
-- Normalize before score-based fusion.
-- Keep RRF as default.
+training/lora_utils.py
 
-Update HybridRetriever to support:
+Functions:
+- infer_model_family(model_name: str) -> str
+- get_lora_target_modules(model_family: str) -> list[str]
+- validate_lora_targets(model, target_modules) -> list[str]
 
-fusion_method:
-- rrf
-- weighted_rrf
-- combsum
+Suggested defaults:
+- gpt2: ["c_attn"]
+- llama/mistral/qwen-like: ["q_proj", "v_proj"]
+- t5/flan-t5 if supported later: document separately
+- fallback: inspect named_modules and warn clearly
 
-Config example:
-hybrid:
-  fusion_method: rrf
-  rrf_k: 60
-  dense_weight: 1.0
-  sparse_weight: 1.0
+Requirements:
+- If no target modules match, raise a clear ValueError.
+- Log matched module names.
+- Save LoRA config to checkpoints/lora_config.json.
+
+Add tests using fake module names or tiny mock model.
+
+==================================================
+PART 3 — RESPONSE-ONLY LOSS MASKING
+==================================================
+
+Current tokenization labels the full prompt + output.
+For instruction tuning, implement response-only labels by setting prompt tokens to -100.
+
+Update _tokenize_batch.
+
+Requirements:
+- Build prompt without output:
+  ### Instruction:
+  ...
+  ### Input:
+  ...
+  ### Response:
+
+- Build full text:
+  prompt + output
+
+- Tokenize full text.
+- Tokenize prompt alone to find prompt length.
+- Set labels[:prompt_length] = -100.
+- Keep labels for response tokens.
+- Respect max_length.
+- Add config flag:
+  response_only_loss: true/false
 
 Add tests:
-- RRF ranking deterministic
-- weighted RRF changes ranking when weights change
-- score normalization handles equal scores
-- fusion handles missing documents
+- prompt tokens are masked
+- response tokens are not masked
+- examples with and without input
+- truncation does not crash
 
 ==================================================
-PART 6 — RETURN SCORES, NOT ONLY DOC IDS
+PART 4 — DATA PREPARATION IMPROVEMENTS
 ==================================================
 
-Current DenseRetriever/SparseRetriever mostly return ranked doc IDs.
-
-Refactor carefully so retrievers can return:
-- doc_id
-- score
-- rank
-
-while preserving old retrieve() behavior if possible.
-
-Suggested:
-retrieve_with_scores(query_text, k) -> list[ScoredDocument]
-
-Keep retrieve(query_text, k) -> list[str] for compatibility.
-
-Dense currently computes cosine similarity manually.
-Sparse uses BM25 scores.
-Hybrid should expose fused scores.
-
-Add tests.
-
-==================================================
-PART 7 — QUERY ROUTER SKELETON
-==================================================
-
-Create retrieval/router.py.
-
-Goal:
-Implement query-adaptive retrieval strategy selection.
-
-Define QueryFeatures:
-- token_count
-- has_rare_terms
-- has_numbers
-- has_acronyms
-- exact_match_likelihood
-- semantic_likelihood
-
-Implement simple heuristic router:
-- exact/named/acronym-heavy query -> sparse
-- conceptual/long natural-language query -> dense
-- mixed/uncertain -> hybrid
-
-Create RouterRetriever:
-- chooses strategy per query
-- logs selected strategy and rationale
-
-Add benchmark strategy:
-- routed
-
-Add metrics by router decision.
-
-Add tests.
-
-==================================================
-PART 8 — RERANKER SKELETON
-==================================================
-
-Create retrieval/rerank.py.
-
-Implement optional reranker interface:
-
-BaseReranker:
-- rerank(query, candidates, corpus, top_k)
-
-Start with:
-- NoOpReranker
-- SimpleOverlapReranker
-
-Optional future:
-- CrossEncoderReranker using sentence-transformers CrossEncoder
-
-Do not make heavy reranking mandatory.
-
-Config:
-reranker:
-  enabled: false
-  type: none
-  top_n: 20
-
-==================================================
-PART 9 — STATISTICAL ANALYSIS
-==================================================
-
-Create evaluation/analysis.py.
+Improve data/prepare.py.
 
 Add:
-- bootstrap confidence intervals for NDCG@k and MRR@k
-- paired comparison between strategies
-- win/loss/tie counts per query
-- quality-latency Pareto analysis
+- max_examples support
+- minimum instruction/output length filters
+- duplicate removal
+- deterministic split
+- dataset_summary.json
 
-Report:
-- best average strategy
-- fastest strategy
-- best quality/latency tradeoff
-- query types where hybrid helps
-- query types where hybrid hurts
+dataset_summary.json should include:
+- dataset name
+- category
+- total raw examples
+- filtered examples
+- train/val/test counts
+- average instruction length
+- average input length
+- average output length
+- category distribution
+- seed
 
-Add tests for bootstrap shape and paired comparison.
+Add tests with small in-memory dataset.
 
 ==================================================
-PART 10 — REPORTING IMPROVEMENT
+PART 5 — TRAINING METADATA
 ==================================================
 
-Create evaluation/reporting.py.
+Save:
+checkpoints/training_metadata.json
 
-Improve report.md with:
-- executive summary
+Include:
+- timestamp
+- git commit if available
+- Python version
+- torch version
+- transformers version
+- peft version
+- model name
+- LoRA config
+- trainable parameter count
+- total parameter count
+- trainable percentage
 - dataset summary
-- strategy comparison table
-- per-query-type table
-- latency table
-- Pareto frontier
-- failure examples:
-  - queries where dense wins
-  - queries where sparse wins
-  - queries where hybrid wins
-  - queries where all fail
-- router analysis if routed strategy enabled
-- methodology limitations
+- seed
+- device
 
-Keep it concise and portfolio-grade.
+Log the same key fields to MLflow.
 
 ==================================================
-PART 11 — PLOTS
+PART 6 — EVALUATION OUTPUTS
 ==================================================
 
-Improve plots:
-- precision@k
-- recall@k
-- ndcg@k
-- mrr@k
-- latency by strategy
-- quality vs latency scatter
-- query-type heatmap
+Currently evaluation writes eval_outputs.jsonl and eval_report.md.
+Add:
+results/metrics.json
+results/per_example_metrics.jsonl
+results/comparison_summary.json
+results/eval_report.md
 
-Do not overcomplicate styling.
+metrics.json should include:
+- base_perplexity
+- fine_perplexity
+- delta_perplexity
+- base_rouge_l
+- fine_rouge_l
+- delta_rouge_l
+- base_exact_match
+- fine_exact_match
+- delta_exact_match
+- base_format_adherence
+- fine_format_adherence
+- delta_format_adherence
+- base_mean_length
+- fine_mean_length
+- delta_mean_length
 
-==================================================
-PART 12 — DATASET MODES
-==================================================
+per_example_metrics.jsonl should include:
+- instruction
+- input
+- reference
+- base_prediction
+- fine_prediction
+- base metrics
+- fine metrics
+- delta metrics
+- winner: base/fine/tie
+- failure_tags
 
-Keep synthetic corpus mode.
-
-Add dataset mode abstraction:
-
-DatasetLoader:
-- SyntheticDatasetLoader
-- JsonlDatasetLoader
-- future BeirDatasetLoader
-
-Do not fully implement BEIR if it becomes large.
-But create a clean interface and docs.
-
-Add docs explaining future BEIR integration.
-
-==================================================
-PART 13 — RESEARCH DOCS
-==================================================
-
-Create docs/ROADMAP.md.
-
-Position the repo as:
-
-Hybrid Retrieval Lab:
-A reproducible benchmark for dense, sparse, hybrid, routed, reranked, and graph-aware retrieval systems for RAG and agent memory.
-
-Include roadmap:
-v0: dense/BM25/RRF synthetic benchmark
-v1: typed schemas + per-query exports
-v2: fusion methods + router
-v3: reranking + statistical analysis
-v4: BEIR/min-BEIR integration
-v5: GraphRAG retrieval
-v6: agent-memory retrieval benchmark
-v7: paper-ready experiments
-
-Create docs/REFERENCES.md.
-
-Include annotated references:
-- BEIR
-- BM25
-- Reciprocal Rank Fusion
-- Dense Passage Retrieval
-- ColBERT / late interaction
-- SPLADE
-- BGE-M3
-- GraphRAG
-- Qdrant hybrid search docs
-- Vespa hybrid search docs
-
-For each:
-- key idea
-- what this repo borrows
-- what remains future work
+comparison_summary.json should include:
+- fine_wins
+- base_wins
+- ties
+- regression_count
+- improvement_count
+- biggest_improvements
+- biggest_regressions
 
 ==================================================
-PART 14 — CONNECTION TO OETA-LAB
+PART 7 — STATISTICAL ANALYSIS
 ==================================================
 
-Create docs/OETA_INTEGRATION.md.
+Create evaluation/stats.py.
 
-Explain how this benchmark can plug into open-ended-task-agent:
+Add:
+- bootstrap confidence intervals for mean ROUGE-L
+- bootstrap CI for perplexity delta
+- paired win/loss/tie counts
+- simple paired sign test if easy
+- effect size summary
 
-- evaluate retrieval strategies for agent memory
-- choose retrieval strategy by query type
-- feed retrieval diagnostics into verifier
-- benchmark GraphRAG-lite retrieval
-- measure retrieval latency vs answer quality
+Keep dependency-free if possible.
 
-Add a simple integration contract:
+Add report section:
+“Are improvements statistically meaningful?”
 
-Input:
-- corpus.jsonl
-- queries.jsonl
+Do not overclaim.
+
+==================================================
+PART 8 — ERROR ANALYSIS IMPROVEMENT
+==================================================
+
+Improve evaluation/error_analysis.py.
+
+Add failure tags:
+- empty_output
+- too_short
+- too_long
+- copied_prompt
+- format_violation
+- low_rouge
+- high_perplexity
+- hallucination_risk_keyword_mismatch
+- regression_vs_base
+
+Cluster or group by these tags.
 
 Output:
-- per_query_results.jsonl
-- retrieval diagnostics
-- best strategy by query type
+results/error_analysis.json
+results/error_analysis.md
 
 ==================================================
-PART 15 — TESTS
+PART 9 — MLflow EVALUATION LOGGING
+==================================================
+
+Currently MLflow is used in training.
+Add eval logging:
+- metrics.json metrics
+- artifacts:
+  - eval_report.md
+  - metrics.json
+  - comparison_summary.json
+  - error_analysis.md if available
+
+Use same experiment name:
+lora-finetune-eval
+
+Tag:
+stage=evaluation
+model_name
+adapter_path
+dataset_category
+seed
+
+==================================================
+PART 10 — MODEL/BASELINE MODES
+==================================================
+
+Add modes:
+- evaluate-base-only
+- evaluate-adapter
+- evaluate-merged-adapter if implemented later
+
+Optional:
+Add adapter merge command:
+python main.py merge-adapter
+
+If too much, document as TODO.
+
+==================================================
+PART 11 — GENERATION CONTROLS
+==================================================
+
+Make generation config-driven:
+- max_new_tokens
+- do_sample
+- temperature
+- top_p
+- repetition_penalty
+
+Default should be deterministic:
+do_sample=false
+
+Save generation_config.json in results.
+
+==================================================
+PART 12 — EXPERIMENT GRID SKELETON
+==================================================
+
+Add scripts/run_grid.py.
+
+Purpose:
+Run multiple LoRA configs and compare them.
+
+Grid fields:
+- r
+- alpha
+- dropout
+- learning_rate
+- epochs
+- target_modules
+
+Do not run large grid by default.
+Add a tiny example grid config:
+configs/tiny_grid.yaml
+
+Output:
+results/grid_summary.json
+results/grid_report.md
+
+This can be a skeleton if full execution is too heavy.
+
+==================================================
+PART 13 — TESTS
 ==================================================
 
 Add pytest tests for:
-- metrics correctness
-- schema validation
-- dense/sparse compatibility with tiny corpus
-- RRF and weighted RRF
-- score normalization
-- router decisions
-- per-query export
-- report generation
-- benchmark run on tiny dataset
+- config loading
+- prompt formatting
+- response-only label masking
+- LoRA target module inference
+- dataset filtering/splitting
+- metric computation
+- bootstrap CI shape
+- per-example winner logic
+- error tag assignment
+- MLflow logging can be mocked
+- CLI smoke tests if feasible
 
-Use tiny in-memory datasets where possible.
+Use tiny fake datasets/models where possible.
+Do not require downloading GPT-2 in unit tests.
 
 ==================================================
-PART 16 — CI
+PART 14 — CI
 ==================================================
 
 Add GitHub Actions:
@@ -540,45 +486,92 @@ Run:
 - pip install -r requirements.txt
 - pip install pytest
 - pytest -v
-- python data/prepare_corpus.py
-- python main.py
 
-If sentence-transformers model download makes CI flaky, create a tiny mock dense retriever test path or mark full benchmark as optional.
+Do not run full training in CI.
+Add optional smoke test with mocked model/tokenizer if feasible.
 
 ==================================================
-PART 17 — README UPDATE
+PART 15 — README UPDATE
 ==================================================
 
-Update README with:
-- clearer positioning
+Update README but keep it concise.
+
+Add:
+- positioning: LoRA Fine-Tuning Evaluation Lab
+- what it evaluates
+- why base vs fine-tuned comparison matters
 - quick start
-- CLI examples
-- strategy list
-- metrics list
+- config-based usage
+- response-only loss explanation
+- LoRA target-module warning by model family
 - output files
+- MLflow
 - roadmap
-- how this connects to RAG / agent memory
-- limitations
 
-Do not make README huge.
-Point detailed material to docs/.
+Do not overclaim that LoRA improves the model.
+Emphasize this repo tests whether it improves.
+
+==================================================
+PART 16 — DOCS
+==================================================
+
+Create docs/ROADMAP.md.
+
+Roadmap:
+v0: Dolly-15k + GPT-2 LoRA + basic eval
+v1: config + correct target modules + response-only loss
+v2: statistical eval + error analysis
+v3: LoRA grid comparison
+v4: QLoRA / bitsandbytes optional
+v5: instruction-following judge
+v6: train verifier/router/skill adapters for agent systems
+v7: paper-ready fine-tuning eval benchmark
+
+Create docs/REFERENCES.md.
+
+Include annotated references/topics:
+- LoRA
+- QLoRA
+- PEFT
+- instruction tuning
+- response-only supervised fine-tuning
+- Dolly-15k
+- ROUGE limitations
+- perplexity vs generation quality
+- MLflow experiment tracking
+- adapter merging
+- catastrophic forgetting / regression testing
+
+For each:
+- key idea
+- what this repo borrows
+- future work
+
+Create docs/AGENT_INTEGRATION.md.
+
+Explain how this repo can support my other agent repos:
+- fine-tune a verifier
+- fine-tune a query router
+- fine-tune a failure tagger
+- fine-tune a trace summarizer
+- evaluate whether fine-tuning improves agent components
 
 ==================================================
 ENGINEERING CONSTRAINTS
 ==================================================
 
-- Keep offline/local execution possible.
-- Avoid mandatory vector database dependency.
-- Avoid huge datasets by default.
-- Keep synthetic demo fast.
-- Do not add secrets.
-- Keep code readable.
-- Add type hints.
+- Keep default demo small.
+- Avoid requiring a large GPU.
+- Do not commit model weights.
+- Add checkpoints/ and mlruns/ to .gitignore if missing.
+- No secrets.
+- Avoid huge generated artifacts.
+- Unit tests should not download large models.
+- Keep code readable and typed.
 - Prefer small modules.
-- Preserve current default workflow.
-- Make benchmark reproducible.
-- Do not overfit to synthetic data.
-- Avoid claiming hybrid is always best.
+- Preserve current CLI behavior where possible.
+- Do not claim fine-tuning is better unless metrics show it.
+- Be explicit about ROUGE/perplexity limitations.
 
 ==================================================
 FINAL COMMANDS TO RUN
@@ -586,31 +579,23 @@ FINAL COMMANDS TO RUN
 
 After implementation, run:
 
-python data/prepare_corpus.py
-python main.py
 pytest -v
 
-If CLI args implemented, also run:
+If environment supports model download/training, also run:
 
-python main.py --config config.yaml
-python main.py --strategies dense sparse hybrid routed
-python main.py --out results
+python main.py prepare --config config.yaml
+python main.py train --config config.yaml
+python main.py evaluate --config config.yaml
+python main.py error-analysis --config config.yaml
+
+If full training is too heavy, run available unit/smoke tests and explain what was not run.
 
 Then summarize:
 - files changed
+- bugs fixed
 - new architecture
-- new retrieval methods
 - tests added
-- benchmark results
+- commands run
 - remaining TODOs
 
-Most important idea: this repo should not just say “hybrid is better.” It should answer:
-
-When does dense retrieval win?
-When does sparse retrieval win?
-When does hybrid win?
-When does hybrid hurt?
-Can a router learn/select the right strategy?
-How much latency do we pay for quality?
-
-That is the difference between a toy benchmark and a serious retrieval-systems project.
+Most important improvement: fix correctness first. A LoRA repo is only impressive if it is honest about whether fine-tuning helped, where it regressed, and whether the experimental setup was valid.
